@@ -1,16 +1,24 @@
 # COFRAP - Script de demarrage (Windows PowerShell 5.1)
 # Usage : .\start.ps1
 
-$NAMESPACE_OF = "openfaas"
-$NAMESPACE_FN = "openfaas-fn"
-$NAMESPACE_DB = "data"
-$BACKEND_PATH = "D:\EPSI\MSPR2\cofrap-poc\mspr-2-backend\functions"
-$INFRA_PATH   = "D:\EPSI\MSPR2\cofrap-poc\mspr-2-infra"
-$GATEWAY_URL  = "http://127.0.0.1:8888"
-$DB_HOST      = "postgres.data.svc.cluster.local"
-$DB_NAME      = "cofrap"
-$DB_USER      = "cofrap_app"
-$DB_PASSWORD  = "ChangeMe_S3cret!"
+# Chargement du fichier .env
+$EnvFile = Join-Path $PSScriptRoot "..\.env"
+if (-not (Test-Path $EnvFile)) {
+    Write-Host "  Fichier .env introuvable. Copie .env.example en .env et remplis les chemins." -ForegroundColor Red
+    return
+}
+
+# Parser le .env (ignore lignes vides et commentaires)
+Get-Content $EnvFile | Where-Object { $_ -match '^\s*[^#]\S+=.+' } | ForEach-Object {
+    $parts = $_ -split '=', 2
+    Set-Variable -Name $parts[0].Trim() -Value $parts[1].Trim() -Scope Script
+}
+
+# Validation des chemins obligatoires
+if ([string]::IsNullOrWhiteSpace($BACKEND_PATH) -or [string]::IsNullOrWhiteSpace($INFRA_PATH)) {
+    Write-Host "  BACKEND_PATH et INFRA_PATH doivent etre definis dans le .env" -ForegroundColor Red
+    return
+}
 
 Write-Host ""
 Write-Host "=== COFRAP : demarrage de la plateforme ===" -ForegroundColor Cyan
@@ -25,16 +33,13 @@ if ($dockerStatus -match "error" -or $dockerStatus -match "cannot") {
 }
 Write-Host "  Docker : OK" -ForegroundColor Green
 
-# 2. Fixer le kubeconfig
-# 2. Fixer le kubeconfig
+# 2. Regenerer le kubeconfig k3d (toujours, pour eviter mismatch TLS)
 Write-Host ""
 Write-Host "[2/8] Correction du kubeconfig..." -ForegroundColor Yellow
 $kubeconfigPath = "$env:USERPROFILE\.kube\config"
 New-Item -ItemType Directory -Path "$env:USERPROFILE\.kube" -Force | Out-Null
 k3d kubeconfig get cofrap | Out-File -FilePath $kubeconfigPath -Encoding utf8
-(Get-Content $kubeconfigPath) -replace 'host\.docker\.internal', '127.0.0.1' | Set-Content $kubeconfigPath
 Write-Host "  kubeconfig regenere : OK" -ForegroundColor Green
-
 
 # 3. Verifier le cluster
 Write-Host ""
@@ -51,7 +56,7 @@ if ($existing) {
     Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 }
-Start-Process -NoNewWindow -FilePath "kubectl" -ArgumentList "port-forward -n openfaas svc/gateway 8888:8080"
+Start-Process -NoNewWindow -FilePath "kubectl" -ArgumentList "port-forward -n $NAMESPACE_OF svc/gateway 8888:8080"
 Start-Sleep -Seconds 3
 Write-Host "  Gateway accessible sur $GATEWAY_URL" -ForegroundColor Green
 
@@ -92,7 +97,7 @@ if ($fernetExists -match "not found" -or $fernetExists -match "No resources") {
     Write-Host "  fernet-key : deja present" -ForegroundColor Green
 }
 
-# Secrets DB individuels
+# Secrets DB
 $dbHostExists = & kubectl get secret db-host -n $NAMESPACE_FN 2>&1 | Out-String
 if ($dbHostExists -match "not found" -or $dbHostExists -match "No resources") {
     Write-Host "  Creation des secrets DB..." -ForegroundColor Yellow
@@ -113,7 +118,7 @@ if ($dbHostExists -match "not found" -or $dbHostExists -match "No resources") {
     Write-Host "  Secrets DB : deja presents" -ForegroundColor Green
 }
 
-# 7. Importer les images dans k3d si necessaire
+# 7. Importer les images dans k3d
 Write-Host ""
 Write-Host "[7/8] Verification des images Docker..." -ForegroundColor Yellow
 $images = @(
