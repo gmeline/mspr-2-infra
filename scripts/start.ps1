@@ -26,18 +26,15 @@ if ($dockerStatus -match "error" -or $dockerStatus -match "cannot") {
 Write-Host "  Docker : OK" -ForegroundColor Green
 
 # 2. Fixer le kubeconfig
+# 2. Fixer le kubeconfig
 Write-Host ""
 Write-Host "[2/8] Correction du kubeconfig..." -ForegroundColor Yellow
 $kubeconfigPath = "$env:USERPROFILE\.kube\config"
-if (Test-Path $kubeconfigPath) {
-    (Get-Content $kubeconfigPath) -replace 'host\.docker\.internal', '127.0.0.1' | Set-Content $kubeconfigPath
-    Write-Host "  kubeconfig : OK" -ForegroundColor Green
-} else {
-    New-Item -ItemType Directory -Path "$env:USERPROFILE\.kube" -Force | Out-Null
-    k3d kubeconfig get cofrap | Out-File -FilePath $kubeconfigPath -Encoding utf8
-    (Get-Content $kubeconfigPath) -replace 'host\.docker\.internal', '127.0.0.1' | Set-Content $kubeconfigPath
-    Write-Host "  kubeconfig regenere : OK" -ForegroundColor Green
-}
+New-Item -ItemType Directory -Path "$env:USERPROFILE\.kube" -Force | Out-Null
+k3d kubeconfig get cofrap | Out-File -FilePath $kubeconfigPath -Encoding utf8
+(Get-Content $kubeconfigPath) -replace 'host\.docker\.internal', '127.0.0.1' | Set-Content $kubeconfigPath
+Write-Host "  kubeconfig regenere : OK" -ForegroundColor Green
+
 
 # 3. Verifier le cluster
 Write-Host ""
