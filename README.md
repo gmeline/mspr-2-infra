@@ -15,4 +15,4 @@ Voir docs/deployment.md.
 Repos liés
 Backend : https://github.com/m/cofrap-backend
 Frontend : https://github.com/mbidoyen/cofrap-frontend
-EOF
+
