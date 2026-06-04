@@ -1,5 +1,65 @@
-# COFRAP - Script de demarrage (Windows PowerShell 5.1)
+# COFRAP - Script de demarrage (Windows PowerShell)
 # Usage : .\start.ps1
+
+# --- Verification des prerequis ---
+Write-Host ""
+Write-Host "  Verification des prerequis..." -ForegroundColor Cyan
+
+# winget
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "  winget non disponible. Installe App Installer depuis le Microsoft Store." -ForegroundColor Red
+    exit 1
+}
+
+# kubectl
+if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installation de kubectl..." -ForegroundColor Yellow
+    winget install -e --id Kubernetes.kubectl --silent --accept-source-agreements --accept-package-agreements
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+}
+Write-Host "  kubectl : OK" -ForegroundColor Green
+
+# Minikube
+if (-not (Get-Command minikube -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installation de Minikube..." -ForegroundColor Yellow
+    winget install -e --id Kubernetes.minikube --silent --accept-source-agreements --accept-package-agreements
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+}
+Write-Host "  Minikube : OK" -ForegroundColor Green
+
+# Helm
+if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installation de Helm..." -ForegroundColor Yellow
+    winget install -e --id Helm.Helm --silent --accept-source-agreements --accept-package-agreements
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+}
+Write-Host "  Helm : OK" -ForegroundColor Green
+
+# faas-cli
+if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installation de faas-cli..." -ForegroundColor Yellow
+    winget install -e --id OpenFaaS.faas-cli --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+    if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
+        # Fallback : installation manuelle
+        $faasUrl = "https://github.com/openfaas/faas-cli/releases/latest/download/faas-cli.exe"
+        $faasPath = "$env:ProgramFiles\faas-cli\faas-cli.exe"
+        New-Item -ItemType Directory -Force -Path "$env:ProgramFiles\faas-cli" | Out-Null
+        Invoke-WebRequest -Uri $faasUrl -OutFile $faasPath
+        [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:ProgramFiles\faas-cli", "Machine")
+        $env:PATH = $env:PATH + ";$env:ProgramFiles\faas-cli"
+    }
+}
+Write-Host "  faas-cli : OK" -ForegroundColor Green
+
+# Docker Desktop
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "  Docker Desktop n'est pas installe." -ForegroundColor Red
+    Write-Host "  Telecharge et installe Docker Desktop (AMD64) depuis : https://www.docker.com/products/docker-desktop/" -ForegroundColor Red
+    Write-Host "  Puis relance ce script." -ForegroundColor Red
+    exit 1
+}
+Write-Host "  Docker Desktop : OK" -ForegroundColor Green
 
 # Chargement du fichier .env
 $EnvFile = Join-Path (Split-Path $PSScriptRoot -Parent) ".env"
@@ -17,6 +77,8 @@ if ([string]::IsNullOrWhiteSpace($BACKEND_PATH) -or [string]::IsNullOrWhiteSpace
     Write-Host "  BACKEND_PATH et INFRA_PATH doivent etre definis dans le .env" -ForegroundColor Red
     return
 }
+
+$Releases = "$INFRA_PATH\releases"
 
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Cyan
@@ -50,8 +112,12 @@ Write-Host "  Docker : OK" -ForegroundColor Green
 Write-Host ""
 Write-Host "[2/9] Verification de Minikube..." -ForegroundColor Yellow
 $minikubeStatus = & minikube status 2>&1 | Out-String
-if ($minikubeStatus -notmatch "Running") {
+if ($minikubeStatus -notmatch "host: Running") {
     Write-Host "  Demarrage de Minikube..." -ForegroundColor Yellow
+    & minikube start --cpus=2 --memory=4096
+} elseif ($minikubeStatus -notmatch "apiserver: Running") {
+    Write-Host "  Apiserver arrete, redemarrage de Minikube..." -ForegroundColor Yellow
+    & minikube stop 2>&1 | Out-Null
     & minikube start --cpus=2 --memory=4096
 }
 & minikube update-context 2>&1 | Out-Null
@@ -60,17 +126,34 @@ Write-Host "  Minikube : OK" -ForegroundColor Green
 # 3. Cluster Kubernetes
 Write-Host ""
 Write-Host "[3/9] Verification du cluster Kubernetes..." -ForegroundColor Yellow
-kubectl get nodes
-Write-Host "  Cluster : OK" -ForegroundColor Green
-
-# 4. Helm
-Write-Host ""
-Write-Host "[4/9] Verification de Helm..." -ForegroundColor Yellow
-if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
-    Write-Host "  Helm non installe. Installe-le via : winget install Helm.Helm" -ForegroundColor Red
+$clusterReady = $false
+for ($i = 0; $i -lt 36; $i++) {
+    $result = & kubectl get nodes --no-headers 2>&1 | Out-String
+    if ($result -match "Ready") {
+        $clusterReady = $true
+        break
+    }
+    Write-Host "  → Cluster pas encore pret, nouvelle tentative ($($i+1)/36)..." -ForegroundColor Yellow
+    if ($i -eq 17) {
+        Write-Host "  → Redemarrage de Minikube..." -ForegroundColor Yellow
+        & minikube stop 2>&1 | Out-Null
+        & minikube start --cpus=2 --memory=4096 2>&1 | Out-Null
+    }
+    Start-Sleep -Seconds 5
+}
+if (-not $clusterReady) {
+    Write-Host "  Cluster non disponible apres 3 minutes. Verifie minikube status." -ForegroundColor Red
     return
 }
-Write-Host "  Helm : OK" -ForegroundColor Green
+Write-Host "  Cluster : OK" -ForegroundColor Green
+
+# 4. Helm repos
+Write-Host ""
+Write-Host "[4/9] Mise a jour des repos Helm..." -ForegroundColor Yellow
+helm repo add openfaas https://openfaas.github.io/faas-netes/ 2>&1 | Out-Null
+helm repo add bitnami https://charts.bitnami.com/bitnami 2>&1 | Out-Null
+helm repo update
+Write-Host "  Repos Helm : OK" -ForegroundColor Green
 
 # 5. OpenFaaS
 Write-Host ""
@@ -79,14 +162,12 @@ $helmList = & helm list -n $NAMESPACE_OF 2>&1 | Out-String
 if ($helmList -notmatch "openfaas") {
     Write-Host "  OpenFaaS absent, nettoyage des residus eventuels..." -ForegroundColor Yellow
 
-    # Supprimer les anciennes releases Helm (openfaas-2 ou autre namespace)
     $allReleases = & helm list -A 2>&1 | Out-String
     if ($allReleases -match "openfaas") {
         helm uninstall openfaas -n openfaas 2>$null | Out-Null
         helm uninstall openfaas -n openfaas-2 2>$null | Out-Null
     }
 
-    # Supprimer les CRDs openfaas en conflit
     $crds = & kubectl get crd 2>&1 | Out-String
     if ($crds -match "openfaas") {
         Write-Host "  Suppression des CRDs openfaas en conflit..." -ForegroundColor Yellow
@@ -96,18 +177,14 @@ if ($helmList -notmatch "openfaas") {
         }
     }
 
-    # Supprimer les namespaces residuels
     kubectl delete namespace openfaas openfaas-fn openfaas-2 2>$null | Out-Null
     Start-Sleep -Seconds 5
 
     Write-Host "  Deploiement d'OpenFaaS..." -ForegroundColor Yellow
     kubectl apply -f https://raw.githubusercontent.com/openfaas/faas-netes/master/namespaces.yml
-    helm repo add openfaas https://openfaas.github.io/faas-netes/ 2>&1 | Out-Null
-    helm repo update
     helm upgrade openfaas --install openfaas/openfaas `
         --namespace $NAMESPACE_OF `
-        --set functionNamespace=$NAMESPACE_FN `
-        --set generateBasicAuth=true
+        -f "$Releases\openfaas\values.yaml"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  Echec du deploiement OpenFaaS. Verifie les logs ci-dessus." -ForegroundColor Red
         return
@@ -122,22 +199,25 @@ if ($helmList -notmatch "openfaas") {
 # 6. PostgreSQL
 Write-Host ""
 Write-Host "[6/9] Verification de PostgreSQL..." -ForegroundColor Yellow
-$pgPod = & kubectl get pods -n $NAMESPACE_DB --no-headers 2>&1 | Out-String
-if ($pgPod -match "No resources found" -or $pgPod -match "not found" -or [string]::IsNullOrWhiteSpace($pgPod.Trim())) {
+$pgHelm = & helm list -n $NAMESPACE_DB 2>&1 | Out-String
+if ($pgHelm -notmatch "postgres") {
     Write-Host "  PostgreSQL absent, deploiement..." -ForegroundColor Yellow
     & kubectl create namespace $NAMESPACE_DB 2>&1 | Out-Null
-    & kubectl apply --validate=false -f "$INFRA_PATH\k8s\postgres\postgres.yaml"
+    $SqlContent = Get-Content "$BACKEND_PATH\..\sql\init.sql" -Raw
+    $TmpValues = "$env:TEMP\postgres-values-tmp.yaml"
+    Get-Content "$Releases\postgres\values.yaml" | Out-File $TmpValues -Encoding utf8
+    Add-Content $TmpValues "`nprimary:`n  initdb:`n    scripts:`n      init.sql: |"
+    $SqlContent -split "`n" | ForEach-Object { Add-Content $TmpValues "        $_" }
+    helm upgrade postgres --install bitnami/postgresql `
+        --namespace $NAMESPACE_DB `
+        -f $TmpValues `
+        --set auth.password="$DB_PASSWORD"
     Write-Host "  Attente que PostgreSQL soit pret..." -ForegroundColor Yellow
     kubectl rollout status statefulset/postgres -n $NAMESPACE_DB --timeout=120s
-    Start-Sleep -Seconds 5
     Write-Host "  PostgreSQL deploye : OK" -ForegroundColor Green
 } else {
     Write-Host "  PostgreSQL : deja en place" -ForegroundColor Green
 }
-
-Write-Host "  Initialisation du schema SQL..." -ForegroundColor Yellow
-& kubectl exec -n $NAMESPACE_DB postgres-0 -- psql -U $DB_USER -d $DB_NAME -c "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(64) UNIQUE NOT NULL, password TEXT, mfa TEXT, gendate BIGINT, expired INTEGER DEFAULT 0);" 2>&1 | Out-Null
-Write-Host "  Schema SQL : OK" -ForegroundColor Green
 
 # 7. Secrets
 Write-Host ""
