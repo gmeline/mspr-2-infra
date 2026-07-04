@@ -217,6 +217,11 @@ if ($pgHelm -notmatch "postgres") {
     Write-Host "  PostgreSQL deploye : OK" -ForegroundColor Green
 } else {
     Write-Host "  PostgreSQL : deja en place" -ForegroundColor Green
+    Write-Host "  Migration : ajout colonne email si absente..." -ForegroundColor Yellow
+    kubectl exec -n $NAMESPACE_DB pod/postgres-0 -- `
+        env PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -d "$DB_NAME" `
+        -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';" 2>&1 | Out-Null
+    Write-Host "  Migration : OK" -ForegroundColor Green
 }
 
 # 7. Secrets
