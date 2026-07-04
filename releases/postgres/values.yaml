@@ -1,0 +1,17 @@
+fullnameOverride: postgres
+
+auth:
+  database: cofrap
+  username: cofrap_app
+  # password est passé via --set auth.password=$DB_PASSWORD au déploiement
+
+primary:
+  persistence:
+    size: 1Gi
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m

@@ -2,3 +2,4 @@ secrets.env
 *.key
 .vscode/
 .idea/
+.env

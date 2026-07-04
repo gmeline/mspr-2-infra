@@ -1,0 +1,4 @@
+functionNamespace: openfaas-fn
+generateBasicAuth: true
+openfaasImagePullPolicy: IfNotPresent
+serviceType: NodePort
