@@ -177,7 +177,7 @@ fi
 
 # --- 6. PostgreSQL ---
 echo ""
-echo "[6/9] Vérification de PostgreSQL..."
+echo "[6/10] Vérification de PostgreSQL..."
 if ! helm list -n "$NAMESPACE_DB" 2>/dev/null | grep -q postgres; then
   echo "  PostgreSQL absent, déploiement..."
   kubectl create namespace "$NAMESPACE_DB" 2>/dev/null || true
@@ -191,11 +191,16 @@ if ! helm list -n "$NAMESPACE_DB" 2>/dev/null | grep -q postgres; then
   echo "  PostgreSQL déployé : OK"
 else
   echo "  PostgreSQL : déjà en place"
+  echo "  Migration : ajout colonne email si absente..."
+  kubectl exec -n "$NAMESPACE_DB" pod/postgres-0 -- \
+    env PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -d "$DB_NAME" \
+    -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';" \
+    2>/dev/null || true
 fi
 
 # --- 7. Secrets ---
 echo ""
-echo "[7/9] Vérification des secrets..."
+echo "[7/10] Vérification des secrets..."
 
 if ! kubectl get secret fernet-key -n "$NAMESPACE_FN" >/dev/null 2>&1; then
   echo "  Génération de la clé Fernet..."
@@ -232,9 +237,22 @@ else
   echo "  Secrets SMTP : déjà présents"
 fi
 
-# --- 8. Images Docker ---
+# --- 8. MailHog ---
 echo ""
-echo "[8/9] Vérification des images Docker..."
+echo "[8/10] Vérification de MailHog..."
+if ! kubectl get pods -n mailhog --no-headers 2>/dev/null | grep -q Running; then
+  echo "  Déploiement de MailHog..."
+  kubectl apply -f "$RELEASES/mailhog/mailhog.yaml" 2>/dev/null
+  echo "  Attente que MailHog soit prêt..."
+  kubectl rollout status deployment/mailhog -n mailhog --timeout=60s 2>/dev/null || true
+  echo "  MailHog déployé : OK"
+else
+  echo "  MailHog : déjà en place"
+fi
+
+# --- 9. Images Docker ---
+echo ""
+echo "[9/10] Vérification des images Docker..."
 IMAGES=(
   "dockerazariel/generate-password:latest"
   "dockerazariel/generate-2fa:latest"
@@ -251,9 +269,9 @@ for image in "${IMAGES[@]}"; do
 done
 echo "  Images : OK"
 
-# --- 9. Port-forward + faas-cli ---
+# --- 10. Port-forward + faas-cli ---
 echo ""
-echo "[9/9] Port-forward gateway + login faas-cli..."
+echo "[10/10] Port-forward gateway + login faas-cli..."
 
 PID=$(lsof -ti tcp:8888 || true)
 if [[ -n "$PID" ]]; then
@@ -262,6 +280,11 @@ if [[ -n "$PID" ]]; then
 fi
 
 kubectl port-forward -n "$NAMESPACE_OF" svc/gateway 8888:8080 >/dev/null 2>&1 &
+
+# Port-forward MailHog
+PID_MH=$(lsof -ti tcp:8025 || true)
+if [[ -n "$PID_MH" ]]; then kill -9 "$PID_MH" || true; sleep 1; fi
+kubectl port-forward -n mailhog svc/mailhog 8025:8025 >/dev/null 2>&1 &
 
 echo "  Attente stabilisation du port-forward..."
 for i in {1..10}; do
@@ -290,13 +313,5 @@ echo ""
 echo "======================================"
 echo "   COFRAP : plateforme prête !"
 echo "======================================"
-echo "  Interface OpenFaaS : $GATEWAY_URL/ui/"
-echo "  Utilisateur        : admin"
-echo "  Mot de passe       : $PASSWORD"
-echo ""
-faas-cli list --gateway "$GATEWAY_URL"
-
-echo ""
-echo "  Port-forward actif — ce terminal doit rester ouvert."
-echo "  Appuie sur Ctrl+C pour arrêter."
-wait
+echo "  Interface OpenFaaS : http://127.0.0.1:8888"
+echo "  Interface MailHog  : http://localhost:8025"

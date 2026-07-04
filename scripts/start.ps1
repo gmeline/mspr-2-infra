@@ -133,9 +133,9 @@ for ($i = 0; $i -lt 36; $i++) {
         $clusterReady = $true
         break
     }
-    Write-Host "  → Cluster pas encore pret, nouvelle tentative ($($i+1)/36)..." -ForegroundColor Yellow
+    Write-Host "  Cluster pas encore pret, nouvelle tentative ($($i+1)/36)..." -ForegroundColor Yellow
     if ($i -eq 17) {
-        Write-Host "  → Redemarrage de Minikube..." -ForegroundColor Yellow
+        Write-Host "  Redemarrage de Minikube..." -ForegroundColor Yellow
         & minikube stop 2>&1 | Out-Null
         & minikube start --cpus=2 --memory=4096 2>&1 | Out-Null
     }
@@ -258,6 +258,25 @@ if ($smtpExists -match "not found" -or $smtpExists -match "No resources") {
     Write-Host "  Secrets SMTP : deja presents" -ForegroundColor Green
 }
 
+# 7b. MailHog (serveur SMTP local)
+Write-Host ""
+Write-Host "  MailHog..." -ForegroundColor Yellow
+$mhPod = & kubectl get pods -n mailhog --no-headers 2>&1 | Out-String
+if ($mhPod -match "No resources found" -or $mhPod -match "not found" -or [string]::IsNullOrWhiteSpace($mhPod.Trim())) {
+    & kubectl apply -f "$Releases\mailhog\mailhog.yaml" 2>&1 | Out-Null
+    Start-Sleep -Seconds 8
+    Write-Host "  MailHog deploye : OK" -ForegroundColor Green
+} else {
+    Write-Host "  MailHog : deja en place" -ForegroundColor Green
+}
+$mhExisting = Get-NetTCPConnection -LocalPort 8025 -ErrorAction SilentlyContinue
+if ($mhExisting) {
+    Stop-Process -Id $mhExisting.OwningProcess -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+Start-Process -NoNewWindow -FilePath "kubectl" -ArgumentList "port-forward -n mailhog svc/mailhog 8025:8025"
+Write-Host "  Boite mail disponible sur http://localhost:8025" -ForegroundColor Green
+
 # 8. Images Docker
 Write-Host ""
 Write-Host "[8/9] Verification des images Docker..." -ForegroundColor Yellow
@@ -291,8 +310,18 @@ Start-Process -NoNewWindow -FilePath "kubectl" -ArgumentList "port-forward -n $N
 Start-Sleep -Seconds 5
 Write-Host "  Gateway accessible sur $GATEWAY_URL" -ForegroundColor Green
 
-$PASSWORD_B64 = & kubectl get secret -n $NAMESPACE_OF basic-auth -o jsonpath="{.data.basic-auth-password}"
-$PASSWORD = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PASSWORD_B64))
+$PASSWORD_B64 = $null
+for ($i = 0; $i -lt 15; $i++) {
+    $PASSWORD_B64 = & kubectl get secret -n $NAMESPACE_OF basic-auth -o jsonpath="{.data.basic-auth-password}" 2>&1
+    if (-not [string]::IsNullOrWhiteSpace($PASSWORD_B64) -and $PASSWORD_B64 -notmatch "Error") { break }
+    Write-Host "  Attente du secret basic-auth ($($i+1)/15)..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 4
+}
+if ([string]::IsNullOrWhiteSpace($PASSWORD_B64) -or $PASSWORD_B64 -match "Error") {
+    Write-Host "  Secret basic-auth introuvable - OpenFaaS pas encore pret. Relance le script." -ForegroundColor Red
+    return
+}
+$PASSWORD = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PASSWORD_B64.Trim()))
 Write-Output $PASSWORD | faas-cli login --username admin --password-stdin --gateway $GATEWAY_URL
 
 $functions = & faas-cli list --gateway $GATEWAY_URL 2>&1 | Out-String
