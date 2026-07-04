@@ -245,6 +245,19 @@ if ($dbHostExists -match "not found" -or $dbHostExists -match "No resources") {
     Write-Host "  Secrets DB : deja presents" -ForegroundColor Green
 }
 
+$smtpExists = & kubectl get secret smtp-host -n $NAMESPACE_FN 2>&1 | Out-String
+if ($smtpExists -match "not found" -or $smtpExists -match "No resources") {
+    Write-Host "  Creation des secrets SMTP..." -ForegroundColor Yellow
+    & kubectl create secret generic smtp-host     --from-literal=smtp-host="$SMTP_HOST"         --namespace $NAMESPACE_FN
+    & kubectl create secret generic smtp-port     --from-literal=smtp-port="$SMTP_PORT"         --namespace $NAMESPACE_FN
+    & kubectl create secret generic smtp-user     --from-literal=smtp-user="$SMTP_USER"         --namespace $NAMESPACE_FN
+    & kubectl create secret generic smtp-password --from-literal=smtp-password="$SMTP_PASSWORD" --namespace $NAMESPACE_FN
+    & kubectl create secret generic smtp-from     --from-literal=smtp-from="$SMTP_FROM"         --namespace $NAMESPACE_FN
+    Write-Host "  Secrets SMTP crees : OK" -ForegroundColor Green
+} else {
+    Write-Host "  Secrets SMTP : deja presents" -ForegroundColor Green
+}
+
 # 8. Images Docker
 Write-Host ""
 Write-Host "[8/9] Verification des images Docker..." -ForegroundColor Yellow

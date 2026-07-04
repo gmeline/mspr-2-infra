@@ -62,6 +62,14 @@ kubectl create secret generic db-name --from-literal=db-name="$DB_NAME" -n openf
 kubectl create secret generic db-user --from-literal=db-user="$DB_USER" -n openfaas-fn 2>/dev/null || true
 kubectl create secret generic db-password --from-literal=db-password="$DB_PASSWORD" -n openfaas-fn 2>/dev/null || true
 
+echo "  Création des secrets SMTP..."
+kubectl create secret generic smtp-host     --from-literal=smtp-host="$SMTP_HOST"         -n openfaas-fn 2>/dev/null || true
+kubectl create secret generic smtp-port     --from-literal=smtp-port="$SMTP_PORT"         -n openfaas-fn 2>/dev/null || true
+kubectl create secret generic smtp-user     --from-literal=smtp-user="$SMTP_USER"         -n openfaas-fn 2>/dev/null || true
+kubectl create secret generic smtp-password --from-literal=smtp-password="$SMTP_PASSWORD" -n openfaas-fn 2>/dev/null || true
+kubectl create secret generic smtp-from     --from-literal=smtp-from="$SMTP_FROM"         -n openfaas-fn 2>/dev/null || true
+echo "  Secrets SMTP créés."
+
 # 5. Fin
 echo "[5/5] Installation terminée."
 echo "Lance maintenant : ./start.sh"

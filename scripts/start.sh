@@ -220,6 +220,18 @@ else
   echo "  Secrets DB : déjà présents"
 fi
 
+if ! kubectl get secret smtp-host -n "$NAMESPACE_FN" >/dev/null 2>&1; then
+  echo "  Création des secrets SMTP..."
+  kubectl create secret generic smtp-host     --from-literal=smtp-host="$SMTP_HOST"         -n "$NAMESPACE_FN"
+  kubectl create secret generic smtp-port     --from-literal=smtp-port="$SMTP_PORT"         -n "$NAMESPACE_FN"
+  kubectl create secret generic smtp-user     --from-literal=smtp-user="$SMTP_USER"         -n "$NAMESPACE_FN"
+  kubectl create secret generic smtp-password --from-literal=smtp-password="$SMTP_PASSWORD" -n "$NAMESPACE_FN"
+  kubectl create secret generic smtp-from     --from-literal=smtp-from="$SMTP_FROM"         -n "$NAMESPACE_FN"
+  echo "  Secrets SMTP créés : OK"
+else
+  echo "  Secrets SMTP : déjà présents"
+fi
+
 # --- 8. Images Docker ---
 echo ""
 echo "[8/9] Vérification des images Docker..."
